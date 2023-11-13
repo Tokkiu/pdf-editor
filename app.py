@@ -259,7 +259,7 @@ def main():
         user_information = st.text_input("Enter your information:")
         if user_information:
             prompt_user = prompt_user.format(field, global_info, user_information)
-            print("prompt", prompt_user)
+            # print("prompt", prompt_user)
             client = OpenAI()
             completion = client.chat.completions.create(
                 model=model_option,
@@ -269,36 +269,39 @@ def main():
                 ]
             )
             data = completion.choices[0].message.content
-            print("response", data)
+            # print("response", data)
             s = data.find('###')
             e = data.find('###', 1)
-            data = data[s + 3: e]
-            update_dic = json.loads(data)
+            if s == -1 or e == -1:
+                st.write("Error to edit, pls try again")
+            else:
+                data = data[s + 3: e]
+                update_dic = json.loads(data)
 
 
-            for f in fields:
-                choose = update_dic[f]
-                if f in state_dic and choose not in state_dic[f]:
-                    find = False
-                    for state in state_dic[f]:
-                        if state.lower().find(choose.lower()) != -1:
-                            update_dic[f] = state
-                            find = True
-                    if not find:
-                        update_dic.pop(f)
+                for f in fields:
+                    choose = update_dic[f]
+                    if f in state_dic and choose not in state_dic[f]:
+                        find = False
+                        for state in state_dic[f]:
+                            if state.lower().find(choose.lower()) != -1:
+                                update_dic[f] = state
+                                find = True
+                        if not find:
+                            update_dic.pop(f)
 
-            print(update_dic)
+                # print(update_dic)
 
-            writer.update_page_form_field_values(
-                writer.pages[0], update_dic
-            )
-            from io import BytesIO
-            with BytesIO() as bytes_stream:
-                writer.write(bytes_stream)
-                import base64
-                b64data = base64.b64encode(bytes_stream.getvalue()).decode('utf-8')
-                pdf_display = F'<iframe src="data:application/pdf;base64,{b64data}" width="700" height="1000" type="application/pdf"></iframe>'
-                st.markdown(pdf_display, unsafe_allow_html=True)
+                writer.update_page_form_field_values(
+                    writer.pages[0], update_dic
+                )
+                from io import BytesIO
+                with BytesIO() as bytes_stream:
+                    writer.write(bytes_stream)
+                    import base64
+                    b64data = base64.b64encode(bytes_stream.getvalue()).decode('utf-8')
+                    pdf_display = F'<iframe src="data:application/pdf;base64,{b64data}" width="700" height="1000" type="application/pdf"></iframe>'
+                    st.markdown(pdf_display, unsafe_allow_html=True)
 
 
 
