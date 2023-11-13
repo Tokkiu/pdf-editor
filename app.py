@@ -259,7 +259,6 @@ def main():
         user_information = st.text_input("Enter your information:")
         if user_information:
             prompt_user = prompt_user.format(field, global_info, user_information)
-            # print("prompt", prompt_user)
             client = OpenAI()
             completion = client.chat.completions.create(
                 model=model_option,
@@ -269,7 +268,6 @@ def main():
                 ]
             )
             data = completion.choices[0].message.content
-            # print("response", data)
             s = data.find('###')
             e = data.find('###', 1)
             if s == -1 or e == -1:
