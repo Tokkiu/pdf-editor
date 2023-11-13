@@ -301,7 +301,8 @@ def main():
                     import base64
                     b64data = base64.b64encode(bytes_stream.getvalue()).decode('utf-8')
                     print("Display", b64data)
-                    pdf_display = F'<iframe src="data:application/pdf;base64,{b64data}" width="700" height="1000" type="application/pdf"></iframe>'
+                    pdf_display = F'<embed src="data:application/pdf;base64,{b64data}" width="700" height="1000" type="application/pdf">'
+                    # pdf_display = F'<iframe src="data:application/pdf;base64,{b64data}" width="700" height="1000" type="application/pdf"></iframe>'
                     st.markdown(pdf_display, unsafe_allow_html=True)
 
 
