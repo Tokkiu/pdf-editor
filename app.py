@@ -178,7 +178,7 @@ def main():
     st.write(
     f"""
     <div style="display: flex; align-items: center; margin-left: 0;">
-        <h1 style="display: inline-block;">PDF Editor</h1>
+        <h1 style="display: inline-block;">FormUp</h1>
         <sup style="margin-left:5px;font-size:small; color: green;">beta</sup>
     </div>
     """,
@@ -301,8 +301,8 @@ def main():
                     import base64
                     b64data = base64.b64encode(bytes_stream.getvalue()).decode('utf-8')
                     print("Display", b64data)
-                    pdf_display = F'<embed src="data:application/pdf;base64,{b64data}" width="700" height="1000" type="application/pdf">'
-                    # pdf_display = F'<iframe src="data:application/pdf;base64,{b64data}" width="700" height="1000" type="application/pdf"></iframe>'
+                    # pdf_display = F'<embed src="data:application/pdf;base64,{b64data}" width="700" height="1000" type="application/pdf"></embed>'
+                    pdf_display = F'<iframe src="data:application/pdf;base64,{b64data}" width="700" height="1000" type="application/pdf"></iframe>'
                     st.markdown(pdf_display, unsafe_allow_html=True)
 
 
