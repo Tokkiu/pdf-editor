@@ -198,9 +198,6 @@ def main():
     global_info = st.sidebar.text_input(
         "Global Information")
 
-    os.environ['http_proxy'] = 'http://127.0.0.1:1087'
-    os.environ['https_proxy'] = 'http://127.0.0.1:1087'
-
     if 'openai_api_key' not in st.session_state:
         openai_api_key = st.text_input(
             'Please enter your OpenAI API key or [get one here](https://platform.openai.com/account/api-keys)', value="", placeholder="Enter the OpenAI API key which begins with sk-")
