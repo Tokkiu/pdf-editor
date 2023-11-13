@@ -1,6 +1,6 @@
 ![Logo](img/logo1.png "Logo")
 
-# PDF Analyzer App
+# PDF Editor App
 
 PDF Editor App is a fill-up application that allows users to upload documents (PDF) and fill up with power of llm.
 
