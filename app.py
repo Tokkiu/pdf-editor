@@ -220,7 +220,6 @@ def main():
         # Load and process the uploaded PDF or TXT files.
         loaded_fields, writers = load_docs(uploaded_files)
         st.write("Documents uploaded and processed.")
-        print("files", uploaded_files)
 
         state_dic = {}
         state_propmt_dic = {}
@@ -278,7 +277,6 @@ def main():
                 data = data[s + 3: e]
                 update_dic = json.loads(data)
 
-                print("update with", update_dic)
 
                 for f in fields:
                     choose = update_dic[f]
@@ -300,7 +298,6 @@ def main():
                     writer.write(bytes_stream)
                     import base64
                     b64data = base64.b64encode(bytes_stream.getvalue()).decode('utf-8')
-                    print("Display", b64data)
                     # pdf_display = F'<embed src="data:application/pdf;base64,{b64data}" width="700" height="1000" type="application/pdf"></embed>'
                     pdf_display = F'<iframe src="data:application/pdf;base64,{b64data}" width="700" height="1000" type="application/pdf"></iframe>'
                     st.markdown(pdf_display, unsafe_allow_html=True)
