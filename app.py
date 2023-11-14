@@ -2,18 +2,14 @@ import itertools
 import json
 import os
 import random
-
+import pandas as pd
 import streamlit as st
 from PyPDF2.generic import NameObject
-from langchain.chains import QAGenerationChain
-from langchain.chat_models import ChatOpenAI
-from langchain.retrievers import SVMRetriever
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
 from openai import OpenAI
 from pypdf import PdfReader, PdfWriter
+from st_aggrid import AgGrid
 
-st.set_page_config(page_title="PDF Writer",page_icon=':shark:')
+st.set_page_config(page_title="FormUp",page_icon=':shark:')
 
 # @st.cache_data
 def load_docs(files):
@@ -43,66 +39,6 @@ def load_docs(files):
 
 
 
-
-@st.cache_resource
-def create_retriever(_embeddings, splits, retriever_type):
-    if retriever_type == "SIMILARITY SEARCH":
-        try:
-            vectorstore = FAISS.from_texts(splits, _embeddings)
-        except (IndexError, ValueError) as e:
-            st.error(f"Error creating vectorstore: {e}")
-            return
-        retriever = vectorstore.as_retriever(k=5)
-    elif retriever_type == "SUPPORT VECTOR MACHINES":
-        retriever = SVMRetriever.from_texts(splits, _embeddings)
-
-    return retriever
-
-@st.cache_resource
-def split_texts(text, chunk_size, overlap, split_method):
-
-    # Split texts
-    # IN: text, chunk size, overlap, split_method
-    # OUT: list of str splits
-
-    st.info("`Splitting doc ...`")
-
-    split_method = "RecursiveTextSplitter"
-    text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=chunk_size, chunk_overlap=overlap)
-
-    splits = text_splitter.split_text(text)
-    if not splits:
-        st.error("Failed to split document")
-        st.stop()
-
-    return splits
-
-@st.cache_data
-def generate_eval(text, N, chunk):
-
-    # Generate N questions from context of chunk chars
-    # IN: text, N questions, chunk size to draw question from in the doc
-    # OUT: eval set as JSON list
-
-    st.info("`Generating sample questions ...`")
-    n = len(text)
-    starting_indices = [random.randint(0, n-chunk) for _ in range(N)]
-    sub_sequences = [text[i:i+chunk] for i in starting_indices]
-    chain = QAGenerationChain.from_llm(ChatOpenAI(temperature=0))
-    eval_set = []
-    for i, b in enumerate(sub_sequences):
-        try:
-            qa = chain.run(b)
-            eval_set.append(qa)
-            st.write("Creating Question:",i+1)
-        except:
-            st.warning('Error generating question %s.' % str(i+1), icon="⚠️")
-    eval_set_full = list(itertools.chain.from_iterable(eval_set))
-    return eval_set_full
-
-
-# ...
 
 def main():
     
@@ -198,7 +134,8 @@ def main():
     global_info = st.sidebar.text_input(
         "Global Information")
 
-    if 'openai_api_key' not in st.session_state:
+    openai_api_key = os.environ["OPENAI_API_KEY"]
+    if not openai_api_key:
         openai_api_key = st.text_input(
             'Please enter your OpenAI API key or [get one here](https://platform.openai.com/account/api-keys)', value="", placeholder="Enter the OpenAI API key which begins with sk-")
         if openai_api_key:
@@ -210,16 +147,21 @@ def main():
             #st.markdown(warning_html, unsafe_allow_html=True)
             return
     else:
-        os.environ["OPENAI_API_KEY"] = st.session_state.openai_api_key
+        os.environ["OPENAI_API_KEY"] = openai_api_key
+        st.session_state.openai_api_key = openai_api_key
 
     uploaded_files = st.file_uploader("Upload a PDF Document", type=[
                                       "pdf"], accept_multiple_files=True)
 
     if uploaded_files:
-
         # Load and process the uploaded PDF or TXT files.
-        loaded_fields, writers = load_docs(uploaded_files)
-        st.write("Documents uploaded and processed.")
+        pdf = uploaded_files[-1]
+        loaded_fields, writers = load_docs(uploaded_files[-1:])
+        if len(loaded_fields) != 1 or loaded_fields[0] is None:
+            st.write(f"Document \"{pdf.name}\" uploaded but cannot be processed. Pls ask for help.")
+            return
+        else:
+            st.write(f"Document \"{pdf.name}\" uploaded and processed. Pls enter as following fields:")
 
         state_dic = {}
         state_propmt_dic = {}
@@ -252,6 +194,17 @@ def main():
         for f, stats in state_propmt_dic.items():
             prompt_user += "When filling up for '{}', you can choose from following options: [{}]\n".format(f, ",".join(
                 stats))
+
+        pd_dic = {"Field":[], "Option":[]}
+        for f in fields:
+            pd_dic["Field"].append(f)
+            if f in state_propmt_dic:
+                pd_dic["Option"].append(state_propmt_dic[f])
+            else:
+                pd_dic["Option"].append("[TEXT]")
+
+        # st.write(pd.DataFrame(pd_dic))
+        AgGrid(pd.DataFrame(pd_dic))
 
         field = ",".join(fields)
         writer = writers[0]
