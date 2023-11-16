@@ -8,7 +8,8 @@ from PyPDF2.generic import NameObject
 from openai import OpenAI
 from pypdf import PdfReader, PdfWriter
 from st_aggrid import AgGrid
-from pdf2image import convert_from_bytes
+import pypdfium2 as pdfium
+
 
 st.set_page_config(page_title="FormUp",page_icon=':shark:')
 
@@ -135,6 +136,8 @@ def main():
     global_info = st.sidebar.text_input(
         "Global Information")
 
+    # os.environ['http_proxy'] = 'http://127.0.0.1:1087'
+    # os.environ['https_proxy'] = 'http://127.0.0.1:1087'
     if "OPENAI_API_KEY" not in os.environ:
         openai_api_key = st.text_input(
             'Please enter your OpenAI API key or [get one here](https://platform.openai.com/account/api-keys)', value="", placeholder="Enter the OpenAI API key which begins with sk-")
@@ -257,7 +260,11 @@ def main():
                     # pdf_display = F'<embed src="data:application/pdf;base64,{b64data}" width="700" height="1000" type="application/pdf"></embed>'
                     # pdf_display = F'<iframe src="data:application/pdf;base64,{b64data}" width="700" height="1000" type="application/pdf"></iframe>'
                     # st.markdown(pdf_display, unsafe_allow_html=True)
-                    img = convert_from_bytes(bytes_stream.getvalue())[0]
+                    # img = convert_from_bytes(bytes_stream.getvalue())[0]
+                    pdf = pdfium.PdfDocument(bytes_stream.getvalue())
+                    page = pdf[0]
+                    img = page.render(scale=4).to_pil()
+
                     st.download_button(label="Download",
                                        data=bytes_stream.getvalue(),
                                        file_name="processed_" + pdf.name,
