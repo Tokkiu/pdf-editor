@@ -8,6 +8,7 @@ from PyPDF2.generic import NameObject
 from openai import OpenAI
 from pypdf import PdfReader, PdfWriter
 from st_aggrid import AgGrid
+from pdf2image import convert_from_bytes
 
 st.set_page_config(page_title="FormUp",page_icon=':shark:')
 
@@ -134,8 +135,7 @@ def main():
     global_info = st.sidebar.text_input(
         "Global Information")
 
-    openai_api_key = os.environ["OPENAI_API_KEY"]
-    if not openai_api_key:
+    if "OPENAI_API_KEY" not in os.environ:
         openai_api_key = st.text_input(
             'Please enter your OpenAI API key or [get one here](https://platform.openai.com/account/api-keys)', value="", placeholder="Enter the OpenAI API key which begins with sk-")
         if openai_api_key:
@@ -147,7 +147,8 @@ def main():
             #st.markdown(warning_html, unsafe_allow_html=True)
             return
     else:
-        os.environ["OPENAI_API_KEY"] = openai_api_key
+        openai_api_key = os.environ["OPENAI_API_KEY"]
+        # os.environ["OPENAI_API_KEY"] = openai_api_key
         st.session_state.openai_api_key = openai_api_key
 
     uploaded_files = st.file_uploader("Upload a PDF Document", type=[
@@ -195,9 +196,11 @@ def main():
             prompt_user += "When filling up for '{}', you can choose from following options: [{}]\n".format(f, ",".join(
                 stats))
 
-        pd_dic = {"Field":[], "Option":[]}
+        pd_dic = {"Field":[], "Type":[], "Option":[]}
         for f in fields:
-            pd_dic["Field"].append(f)
+            fs = f.split(" ")
+            pd_dic["Field"].append(" ".join(fs[:-2]))
+            pd_dic["Type"].append(" ".join(fs[-2:]))
             if f in state_propmt_dic:
                 pd_dic["Option"].append(state_propmt_dic[f])
             else:
@@ -252,8 +255,14 @@ def main():
                     import base64
                     b64data = base64.b64encode(bytes_stream.getvalue()).decode('utf-8')
                     # pdf_display = F'<embed src="data:application/pdf;base64,{b64data}" width="700" height="1000" type="application/pdf"></embed>'
-                    pdf_display = F'<iframe src="data:application/pdf;base64,{b64data}" width="700" height="1000" type="application/pdf"></iframe>'
-                    st.markdown(pdf_display, unsafe_allow_html=True)
+                    # pdf_display = F'<iframe src="data:application/pdf;base64,{b64data}" width="700" height="1000" type="application/pdf"></iframe>'
+                    # st.markdown(pdf_display, unsafe_allow_html=True)
+                    img = convert_from_bytes(bytes_stream.getvalue())[0]
+                    st.download_button(label="Download",
+                                       data=bytes_stream.getvalue(),
+                                       file_name="processed_" + pdf.name,
+                                       mime='application/octet-stream')
+                    st.image(img)
 
 
 
