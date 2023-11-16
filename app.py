@@ -261,8 +261,7 @@ def main():
                     # pdf_display = F'<iframe src="data:application/pdf;base64,{b64data}" width="700" height="1000" type="application/pdf"></iframe>'
                     # st.markdown(pdf_display, unsafe_allow_html=True)
                     # img = convert_from_bytes(bytes_stream.getvalue())[0]
-                    pdf = pdfium.PdfDocument(bytes_stream.getvalue())
-                    page = pdf[0]
+                    page = pdfium.PdfDocument(bytes_stream.getvalue())[0]
                     img = page.render(scale=4).to_pil()
 
                     st.download_button(label="Download",
