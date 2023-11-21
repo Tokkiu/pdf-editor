@@ -9,7 +9,7 @@ from openai import OpenAI
 from pypdf import PdfReader, PdfWriter
 from st_aggrid import AgGrid
 import pypdfium2 as pdfium
-
+import requests
 
 st.set_page_config(page_title="FormUp",page_icon=':shark:')
 
@@ -162,7 +162,64 @@ def main():
         pdf = uploaded_files[-1]
         loaded_fields, writers = load_docs(uploaded_files[-1:])
         if len(loaded_fields) != 1 or loaded_fields[0] is None:
-            st.write(f"Document \"{pdf.name}\" uploaded but cannot be processed. Pls ask for help.")
+            st.write(f"Document \"{pdf.name}\" uploaded but cannot be processed. Only fields preview is supported .")
+
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {openai_api_key}"
+            }
+
+
+            from io import BytesIO
+            import base64
+            from io import BytesIO
+            with BytesIO() as bytes_stream:
+                writers[0].write(bytes_stream)
+                page = pdfium.PdfDocument(bytes_stream.getvalue())[0]
+                buffered = BytesIO()
+                img = page.render(scale=4).to_pil()
+                img.save(buffered, format="JPEG")
+                img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+            payload = {
+                "model": "gpt-4-vision-preview",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": "Pls summarize all fillable fields from this image of pdf file, and return them in JSON format. The JSON should only be organized in one level. Key is the field name. Value is the field type. Start output JSON with ### and end with ###. No comment in json response."
+                            },
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{img_str}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "max_tokens": 300
+            }
+
+            response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
+            data = response.json()['choices'][0]['message']['content']
+            s = data.find('###')
+            e = data.find('###', 1)
+            if s == -1 or e == -1:
+                st.write("Error to edit, pls try again")
+            else:
+
+                data = data[s + 3: e]
+                update_dic = json.loads(data)
+                pd_dic = {"Field": [], "Type": [], "Option": []}
+                for k, v in update_dic.items():
+                    pd_dic["Field"].append(k)
+                    pd_dic["Type"].append(v[0].upper() + v[1:] + " Box")
+                    pd_dic["Option"].append("[TEXT]")
+                AgGrid(pd.DataFrame(pd_dic))
+
             return
         else:
             st.write(f"Document \"{pdf.name}\" uploaded and processed. Pls enter as following fields:")
@@ -201,14 +258,25 @@ def main():
 
         pd_dic = {"Field":[], "Type":[], "Option":[]}
         for f in fields:
-            fs = f.split(" ")
-            pd_dic["Field"].append(" ".join(fs[:-2]))
-            pd_dic["Type"].append(" ".join(fs[-2:]))
+            if f.lower().endswith("box"):
+                fs = f.split(" ")
+                pd_dic["Field"].append(" ".join(fs[:-2]))
+                pd_dic["Type"].append(" ".join(fs[-2:]))
+
+            elif len(f.split(".")) > 1:
+                pd_dic["Field"].append(f.split(".")[-1])
+                pd_dic["Type"].append("Text Box")
+
+            else:
+                pd_dic["Field"].append(f)
+                pd_dic["Type"].append("Text Box")
+
             if f in state_propmt_dic:
                 pd_dic["Option"].append(state_propmt_dic[f])
+                if pd_dic["Type"][-1] == "Text Box":
+                    pd_dic["Type"][-1] = "Check Box"
             else:
                 pd_dic["Option"].append("[TEXT]")
-
         # st.write(pd.DataFrame(pd_dic))
         AgGrid(pd.DataFrame(pd_dic))
 
