@@ -8,4 +8,3 @@ scikit-learn==1.2.2
 pypdf==3.17.0
 streamlit-aggrid
 pypdfium2
-base64
