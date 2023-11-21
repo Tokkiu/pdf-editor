@@ -210,8 +210,8 @@ def main():
             if s == -1 or e == -1:
                 st.write("Error to edit, pls try again")
             else:
-
                 data = data[s + 3: e]
+                print("Data", data)
                 update_dic = json.loads(data)
                 pd_dic = {"Field": [], "Type": [], "Option": []}
                 for k, v in update_dic.items():
