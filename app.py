@@ -208,10 +208,13 @@ def main():
             s = data.find('###')
             e = data.find('###', 1)
             if s == -1 or e == -1:
-                st.write("Error to edit, pls try again")
+                st.write("Error to preview, pls try again")
             else:
                 data = data[s + 3: e]
-                print("Data", data)
+                if len(data.replace(" ", "")) == 0:
+                    st.write("Error to preview, pls try again")
+                    return
+
                 update_dic = json.loads(data)
                 pd_dic = {"Field": [], "Type": [], "Option": []}
                 for k, v in update_dic.items():
