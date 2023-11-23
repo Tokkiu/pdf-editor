@@ -10,6 +10,14 @@ from pypdf import PdfReader, PdfWriter
 from st_aggrid import AgGrid
 import pypdfium2 as pdfium
 import requests
+from PyPDF2 import PdfWriter, PdfReader
+import io
+from reportlab.pdfgen import canvas
+from reportlab.lib.pagesizes import letter
+from pdfrw.buildxobj import pagexobj
+from pdfrw import PdfReader as pdfrwReader
+import base64
+from io import BytesIO
 
 st.set_page_config(page_title="FormUp",page_icon=':shark:')
 
@@ -19,28 +27,161 @@ def load_docs(files):
     all_text = ""
     all_fields = []
     writers = []
+    readers = []
+    scale = []
     for file_path in files:
         file_extension = os.path.splitext(file_path.name)[1]
         if file_extension == ".pdf":
-            # pdf_reader = PyPDF2.PdfReader(file_path)
-            # pdf_reader.getFields()
             reader = PdfReader(file_path)
+            page = reader.pages[0]
+
+            # pdfrwpages = pdfrwReader(file_path).pages
+            # pdfrwpg = pagexobj(pdfrwpages[0])
+            if page.get('/Rotate', 0) in [90, 270]:
+                print('转90-270')
+                height, width = page['/MediaBox'][2] - page['/MediaBox'][0], page['/MediaBox'][3] - page['/MediaBox'][1]
+            else:
+                height, width = page['/MediaBox'][3] - page['/MediaBox'][1], page['/MediaBox'][2] - page['/MediaBox'][0]
+            print("hei", height, "w", width)
+            # width, height = pdfrwpg.BBox[2], pdfrwpg.BBox[3]
+            scale = [width, height]
             writer = PdfWriter()
 
             if '/AcroForm' in reader.trailer['/Root'].keys():
                 writer._root_object.update({NameObject("/AcroForm"): reader.trailer["/Root"]["/AcroForm"]})
 
             fields = reader.get_fields()
-            page = reader.pages[0]
             writer.add_page(page)
             all_fields.append(fields)
             writers.append(writer)
+            readers.append(reader)
         else:
             st.warning('Please provide pdf.', icon="⚠️")
-    return all_fields, writers
+    return all_fields, writers, readers, scale
+
+
+def writePdf(existing_pdf, text, position, scale):
+    packet = io.BytesIO()
+    can = canvas.Canvas(packet, pagesize=letter)
+    for k, v in text.items():
+        pos = position[k]
+        print(scale, "K", k, "v" , v, "pos", pos)
+        can.drawString(int(pos[0]) * scale, int(pos[1]) / scale, v)
+
+    can.save()
+
+    # move to the beginning of the StringIO buffer
+    packet.seek(0)
+
+    # create a new PDF with Reportlab
+    new_pdf = PdfReader(packet)
+    # read your existing PDF
+    # existing_pdf = PdfReader(open("/Users/ary/Downloads/ust.pdf", "rb"))
+    output = PdfWriter()
+    # add the "watermark" (which is the new pdf) on the existing page
+    page = existing_pdf.pages[0]
+    page.merge_page(new_pdf.pages[0])
+    output.add_page(page)
+    # finally, write "output" to a real file
+    # output_stream = open("/Users/ary/Downloads/ust.destination.pdf", "wb")
+    # output_stream.close()
+    with BytesIO() as bytes_stream:
+        output.write(bytes_stream)
+        return bytes_stream.getvalue()
 
 
 
+def askPosition(img_str):
+    # OpenAI API Key
+    api_key = os.environ['OPENAI_API_KEY']
+
+    # Function to encode the image
+    def encode_image(image_path):
+        with open(image_path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode('utf-8')
+
+    # Path to your image
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
+
+    payload = {
+        "model": "gpt-4-vision-preview",
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Pls summarize all fillable fields from this image of pdf file, and return them in JSON format. You need to find the field name and the field blank to fill in. You know we will fill each field according to the field name and write down some text on the fillable blank. The JSON should only be organized in one level. Key is the field name. Value is a list, the first element is field type, and the second element is the relative position in the pixel of the field blank. Here we assume the left and bottom should be start point. Additionally, the key of 'RAWSCALE' should be put in this json. The value of 'RAWSCALE' is the pixel width and height of this pdf. Start output JSON with ### and end with ###. No comment in json response."
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{img_str}"
+                        }
+                    }
+                ]
+            }
+        ],
+        "max_tokens": 300
+    }
+
+    response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
+    data = response.json()['choices'][0]['message']['content']
+    s = data.find('###')
+    e = data.find('###', 1)
+    if s == -1 or e == -1:
+        return {}
+    else:
+        data = data[s + 3: e]
+        update_dic = json.loads(data)
+        return update_dic
+
+
+
+
+
+def prompt_system():
+    return '''
+    You are a poetic assistant, skilled in filling out information on pdf files. 
+    To effectively fill in the information in the PDF file, you require a sentence of information to analyze and determine which details should be inputted into the designated text boxes.
+    Fill all those text boxes and generate the appropriate output in JSON format.  
+    Remember don't leave any box empty. If the information for one box wasn't given, please fill up that box with the most appropriate text according to your knowledge which should align with the information from the provided sentence.
+    The key is the box name as input, the value is the information you just analyzed.
+    The language of response should be same with provided sentence. Start output json with ### and end with ###. No comment in json response.
+    '''
+
+def prompt_user():
+    return '''
+    Here is the list of text boxes you can fill up: [{}].
+    Here is the global information you may need to know: "{}".
+    Here is the sentence of input information you need: "{}".
+    '''
+
+
+def ask_user_info(model_option, global_info, user_information, field, my_prompt_user):
+    my_prompt_user = my_prompt_user.format(field, global_info, user_information)
+    client = OpenAI()
+    completion = client.chat.completions.create(
+        model=model_option,
+        messages=[
+            {"role": "system", "content": prompt_system()},
+            {"role": "user", "content": my_prompt_user}
+        ]
+    )
+    data = completion.choices[0].message.content
+    s = data.find('###')
+    e = data.find('###', 1)
+    if s == -1 or e == -1:
+        return {}
+    else:
+        print("User info", data)
+        data = data[s + 3: e]
+        update_dic = json.loads(data)
+        return update_dic
 
 def main():
     
@@ -160,17 +301,10 @@ def main():
     if uploaded_files:
         # Load and process the uploaded PDF or TXT files.
         pdf = uploaded_files[-1]
-        loaded_fields, writers = load_docs(uploaded_files[-1:])
+        loaded_fields, writers, readers, scale = load_docs(uploaded_files[-1:])
         if len(loaded_fields) != 1 or loaded_fields[0] is None:
-            st.write(f"Document \"{pdf.name}\" uploaded but cannot be processed. Only fields preview is supported .")
+            st.write(f"Document \"{pdf.name}\" uploaded but cannot be processed. Try to use ChatGPT to locate fields.")
 
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {openai_api_key}"
-            }
-
-
-            from io import BytesIO
             import base64
             from io import BytesIO
             with BytesIO() as bytes_stream:
@@ -181,49 +315,51 @@ def main():
                 img.save(buffered, format="JPEG")
                 img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-            payload = {
-                "model": "gpt-4-vision-preview",
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": "Pls summarize all fillable fields from this image of pdf file, and return them in JSON format. The JSON should only be organized in one level. Key is the field name. Value is the field type. Start output JSON with ### and end with ###. No comment in json response."
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{img_str}"
-                                }
-                            }
-                        ]
-                    }
-                ],
-                "max_tokens": 300
-            }
+            update_dic = askPosition(img_str)
+            if len(update_dic) > 1:
 
-            response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
-            data = response.json()['choices'][0]['message']['content']
-            s = data.find('###')
-            e = data.find('###', 1)
-            if s == -1 or e == -1:
-                st.write("Error to preview, pls try again")
-            else:
-                data = data[s + 3: e]
-                if len(data.replace(" ", "")) == 0:
-                    st.write("Error to preview, pls try again")
-                    return
-
-                update_dic = json.loads(data)
                 pd_dic = {"Field": [], "Type": [], "Option": []}
-                for k, v in update_dic.items():
+                fields = []
+                pos_dic = {}
+                raww, rwah = 0, 0
+                print("update", update_dic)
+                for k, v_arr in update_dic.items():
+                    if k == "RAWSCALE":
+                        raww, rwah = v_arr
+                        continue
+
+                    fields.append(k)
+                    print("k", k, "v", v_arr)
+                    v = v_arr[0]
+                    pos = v_arr[1][-2:]
+                    pos_dic[k] = pos
                     pd_dic["Field"].append(k)
                     pd_dic["Type"].append(v[0].upper() + v[1:] + " Box")
                     pd_dic["Option"].append("[TEXT]")
                 AgGrid(pd.DataFrame(pd_dic))
 
+
+                field = ",".join(fields)
+                user_information = st.text_input("Enter your information:")
+                if user_information:
+                    my_prompt_user = prompt_user().format(field, global_info, user_information)
+                    info_dic = ask_user_info(model_option, global_info, user_information, field, my_prompt_user)
+                    if len(info_dic) > 1:
+                        reader = readers[0]
+                        sizescale = int(scale[0])/int(raww)
+                        print("scale", raww, rwah, scale)
+                        pdfdata = writePdf(reader, info_dic, pos_dic, sizescale)
+                        page = pdfium.PdfDocument(pdfdata)[0]
+                        img = page.render(scale=4).to_pil()
+                        st.download_button(label="Download",
+                                           data=pdfdata,
+                                           file_name="processed_" + pdf.name,
+                                           mime='application/octet-stream')
+                        st.image(img)
+            else:
+                st.write("Error to preview, pls try again")
             return
+
         else:
             st.write(f"Document \"{pdf.name}\" uploaded and processed. Pls enter as following fields:")
 
@@ -239,24 +375,9 @@ def main():
                 state_dic[f] = field['/_States_']
                 state_propmt_dic[f] = stats
 
-
-        prompt_system = '''
-        You are a poetic assistant, skilled in filling out information on pdf files. 
-        To effectively fill in the information in the PDF file, you require a sentence of information to analyze and determine which details should be inputted into the designated text boxes.
-        Fill all those text boxes and generate the appropriate output in JSON format.  
-        Remember don't leave any box empty. If the information for one box wasn't given, please fill up that box with the most appropriate text according to your knowledge which should align with the information from the provided sentence.
-        The key is the box name as input, the value is the information you just analyzed.
-        The language of response should be same with provided sentence. Start output json with ### and end with ###. No comment in json response.
-        '''
-
-        prompt_user = '''
-        Here is the list of text boxes you can fill up: [{}].
-        Here is the global information you may need to know: "{}".
-        Here is the sentence of input information you need: "{}".
-        '''
-
+        my_prompt_user = prompt_user()
         for f, stats in state_propmt_dic.items():
-            prompt_user += "When filling up for '{}', you can choose from following options: [{}]\n".format(f, ",".join(
+             my_prompt_user += "When filling up for '{}', you can choose from following options: [{}]\n".format(f, ",".join(
                 stats))
 
         pd_dic = {"Field":[], "Type":[], "Option":[]}
@@ -283,31 +404,13 @@ def main():
         # st.write(pd.DataFrame(pd_dic))
         AgGrid(pd.DataFrame(pd_dic))
 
-        field = ",".join(fields)
         writer = writers[0]
 
+        field = ",".join(fields)
         user_information = st.text_input("Enter your information:")
         if user_information:
-            prompt_user = prompt_user.format(field, global_info, user_information)
-            client = OpenAI()
-            completion = client.chat.completions.create(
-                model=model_option,
-                messages=[
-                    {"role": "system", "content": prompt_system},
-                    {"role": "user", "content": prompt_user}
-                ]
-            )
-            data = completion.choices[0].message.content
-            s = data.find('###')
-            e = data.find('###', 1)
-            if s == -1 or e == -1:
-                st.write("Error to edit, pls try again")
-            else:
-
-                data = data[s + 3: e]
-                update_dic = json.loads(data)
-
-
+            update_dic = ask_user_info(model_option, global_info, user_information, field, my_prompt_user)
+            if len(update_dic) > 1:
                 for f in fields:
                     choose = update_dic[f]
                     if f in state_dic and choose not in state_dic[f]:
@@ -326,22 +429,15 @@ def main():
                 from io import BytesIO
                 with BytesIO() as bytes_stream:
                     writer.write(bytes_stream)
-                    import base64
-                    b64data = base64.b64encode(bytes_stream.getvalue()).decode('utf-8')
-                    # pdf_display = F'<embed src="data:application/pdf;base64,{b64data}" width="700" height="1000" type="application/pdf"></embed>'
-                    # pdf_display = F'<iframe src="data:application/pdf;base64,{b64data}" width="700" height="1000" type="application/pdf"></iframe>'
-                    # st.markdown(pdf_display, unsafe_allow_html=True)
-                    # img = convert_from_bytes(bytes_stream.getvalue())[0]
                     page = pdfium.PdfDocument(bytes_stream.getvalue())[0]
                     img = page.render(scale=4).to_pil()
-
                     st.download_button(label="Download",
                                        data=bytes_stream.getvalue(),
                                        file_name="processed_" + pdf.name,
                                        mime='application/octet-stream')
                     st.image(img)
-
-
+            else:
+                st.write("Error to edit, pls try again")
 
 
 if __name__ == "__main__":
