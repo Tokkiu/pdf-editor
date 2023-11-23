@@ -1,7 +1,5 @@
-import itertools
 import json
 import os
-import random
 import pandas as pd
 import streamlit as st
 from PyPDF2.generic import NameObject
@@ -14,8 +12,6 @@ from PyPDF2 import PdfWriter, PdfReader
 import io
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
-from pdfrw.buildxobj import pagexobj
-from pdfrw import PdfReader as pdfrwReader
 import base64
 from io import BytesIO
 
