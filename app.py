@@ -8,7 +8,6 @@ from pypdf import PdfReader, PdfWriter
 from st_aggrid import AgGrid
 import pypdfium2 as pdfium
 import requests
-from PyPDF2 import PdfWriter, PdfReader
 import io
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import letter
@@ -111,7 +110,7 @@ def askPosition(img_str):
                 "content": [
                     {
                         "type": "text",
-                        "text": "Pls summarize all fillable fields from this image of pdf file, and return them in JSON format. You need to find the field name and the field blank to fill in. You know we will fill each field according to the field name and write down some text on the fillable blank. The JSON should only be organized in one level. Key is the field name. Value is a list, the first element is field type, and the second element is the relative position in the pixel of the field blank. Here we assume the left and bottom should be start point. Additionally, the key of 'RAWSCALE' should be put in this json. The value of 'RAWSCALE' is the pixel width and height of this pdf. Start output JSON with ### and end with ###. No comment in json response."
+                        "text": "Pls summarize all fillable fields from this image, and return them in JSON format. You need to find the field name and the field blank to fill in. You know we will fill each field according to the field name and write down some text on the fillable blank. The JSON should only be organized in one level. Key is the field name. Value is a list, the first element is field type, and the second element is the relative position in the pixel of the field blank. Here we assume the left and bottom should be start point. Additionally, the key of 'RAWSCALE' should be put in this json. The value of 'RAWSCALE' is the pixel width and height of this pdf. Start output JSON with ### and end with ###. No comment in json response."
                     },
                     {
                         "type": "image_url",
@@ -122,7 +121,7 @@ def askPosition(img_str):
                 ]
             }
         ],
-        "max_tokens": 300
+        "max_tokens": 1000
     }
 
     response = requests.post("https://api.openai.com/v1/chat/completions", headers=headers, json=payload)
@@ -130,11 +129,11 @@ def askPosition(img_str):
     s = data.find('###')
     e = data.find('###', 1)
     if s == -1 or e == -1:
-        return {}
+        return {}, data
     else:
         data = data[s + 3: e]
         update_dic = json.loads(data)
-        return update_dic
+        return update_dic, None
 
 
 
@@ -142,8 +141,8 @@ def askPosition(img_str):
 
 def prompt_system():
     return '''
-    You are a poetic assistant, skilled in filling out information on pdf files. 
-    To effectively fill in the information in the PDF file, you require a sentence of information to analyze and determine which details should be inputted into the designated text boxes.
+    You are a poetic assistant, skilled in filling out information on files. 
+    To effectively fill in the information in the provided file, you require a sentence of information to analyze and determine which details should be inputted into the designated text boxes.
     Fill all those text boxes and generate the appropriate output in JSON format.  
     Remember don't leave any box empty. If the information for one box wasn't given, please fill up that box with the most appropriate text according to your knowledge which should align with the information from the provided sentence.
     The key is the box name as input, the value is the information you just analyzed.
@@ -273,6 +272,9 @@ def main():
     global_info = st.sidebar.text_input(
         "Global Information")
 
+    if 'mode' not in st.session_state:
+        st.session_state['mode'] = 'upload'
+
     # os.environ['http_proxy'] = 'http://127.0.0.1:1087'
     # os.environ['https_proxy'] = 'http://127.0.0.1:1087'
     if "OPENAI_API_KEY" not in os.environ:
@@ -291,13 +293,63 @@ def main():
         # os.environ["OPENAI_API_KEY"] = openai_api_key
         st.session_state.openai_api_key = openai_api_key
 
-    uploaded_files = st.file_uploader("Upload a PDF Document", type=[
-                                      "pdf"], accept_multiple_files=True)
 
-    if uploaded_files:
-        # Load and process the uploaded PDF or TXT files.
-        pdf = uploaded_files[-1]
-        loaded_fields, writers, readers, scale = load_docs(uploaded_files[-1:])
+    filePath = {
+        "Payroll Register":"Payroll_Register_Template.pdf",
+        "OoPdfFormExample":"OoPdfFormExample.pdf",
+        "Donation gift card":"donation_gift_card.pdf",
+    }
+
+
+    col1, col2 = st.columns([3,1])
+
+    with col1:
+        def changepdf():
+            st.session_state.mode = "upload"
+
+        uploaded_files = st.file_uploader("Upload a PDF Document", type=[
+                                      "pdf"], accept_multiple_files=False, on_change=changepdf)
+    with col2:
+
+        def changevalue():
+            st.session_state.mode = "sample"
+
+        selected_file = st.selectbox(
+            "Choose from samples",
+            filePath.keys(),
+            index=None,
+            placeholder="Pick one pdf ...",
+            on_change=changevalue
+        )
+
+
+
+    print("upload", uploaded_files)
+    print("sample", selected_file)
+    if st.session_state.mode == "upload":
+        pdf = uploaded_files
+    else:
+
+        pdf = open(filePath[selected_file], 'rb')
+    print("mode", st.session_state.mode)
+    if pdf:
+        loaded_fields, writers, readers, scale = load_docs([pdf])
+        if st.session_state.mode == "sample":
+
+            # preader = readers[0]
+            st.write("You select sample pdf file:")
+            preader = PdfReader(filePath[selected_file])
+            pwriter = PdfWriter()
+            pwriter.add_page(preader.pages[0])
+            from io import BytesIO
+            with BytesIO() as bytes_stream:
+                pwriter.write(bytes_stream)
+                page = pdfium.PdfDocument(bytes_stream.getvalue())[0]
+                img = page.render(scale=4).to_pil()
+                st.image(img, caption=pdf.name)
+
+
+
         if len(loaded_fields) != 1 or loaded_fields[0] is None:
             st.write(f"Document \"{pdf.name}\" uploaded but cannot be processed. Try to use ChatGPT to locate fields.")
 
@@ -311,8 +363,8 @@ def main():
                 img.save(buffered, format="JPEG")
                 img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-            update_dic = askPosition(img_str)
-            if len(update_dic) > 1:
+            update_dic, err = askPosition(img_str)
+            if err is None:
 
                 pd_dic = {"Field": [], "Type": [], "Option": []}
                 fields = []
@@ -353,7 +405,7 @@ def main():
                                            mime='application/octet-stream')
                         st.image(img)
             else:
-                st.write("Error to preview, pls try again")
+                st.write("Error to preview:", err)
             return
 
         else:
@@ -425,13 +477,14 @@ def main():
                 from io import BytesIO
                 with BytesIO() as bytes_stream:
                     writer.write(bytes_stream)
-                    page = pdfium.PdfDocument(bytes_stream.getvalue())[0]
+                    filled = bytes_stream.getvalue()
+                    page = pdfium.PdfDocument(filled)[0]
                     img = page.render(scale=4).to_pil()
                     st.download_button(label="Download",
-                                       data=bytes_stream.getvalue(),
+                                       data=filled,
                                        file_name="processed_" + pdf.name,
                                        mime='application/octet-stream')
-                    st.image(img)
+                    st.image(img, caption="filled_" + pdf.name)
             else:
                 st.write("Error to edit, pls try again")
 
