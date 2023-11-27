@@ -60,8 +60,8 @@ def writePdf(existing_pdf, text, position, scale):
     can = canvas.Canvas(packet, pagesize=letter)
     for k, v in text.items():
         pos = position[k]
-        print(scale, "K", k, "v" , v, "pos", pos)
-        can.drawString(int(pos[0]) * scale, int(pos[1]) / scale, v)
+        print(scale, "K [", k, "]  v [" , v, "] pos", pos)
+        can.drawString(int(pos[0]) * scale, int(pos[1]) * scale, v)
 
     can.save()
 
@@ -102,6 +102,19 @@ def askPosition(img_str):
         "Authorization": f"Bearer {api_key}"
     }
 
+    prompt = '''
+    Pls give me the exact position of all fillable blank from this image, and return them in JSON format.
+    The key of json is the blank name and the value is json is the blank information. 
+    The JSON should only be organized in one level. 
+    More precisely, the value is a list.
+    The first element of this list is blank type.
+    The second element of this list is the relative position in the pixel of the blank. 
+
+    Here we assume the left and bottom should be start point. 
+    Additionally, the key of 'RAWSCALE' should be put in this json. The value of 'RAWSCALE' is the pixel width and height of this image. 
+    Start output JSON with ### and end with ###. No comment in json response."
+    '''
+
     payload = {
         "model": "gpt-4-vision-preview",
         "messages": [
@@ -110,7 +123,7 @@ def askPosition(img_str):
                 "content": [
                     {
                         "type": "text",
-                        "text": "Pls summarize all fillable fields from this image, and return them in JSON format. You need to find the field name and the field blank to fill in. You know we will fill each field according to the field name and write down some text on the fillable blank. The JSON should only be organized in one level. Key is the field name. Value is a list, the first element is field type, and the second element is the relative position in the pixel of the field blank. Here we assume the left and bottom should be start point. Additionally, the key of 'RAWSCALE' should be put in this json. The value of 'RAWSCALE' is the pixel width and height of this pdf. Start output JSON with ### and end with ###. No comment in json response."
+                        "text": prompt
                     },
                     {
                         "type": "image_url",
@@ -331,7 +344,7 @@ def main():
     else:
 
         pdf = open(filePath[selected_file], 'rb')
-    print("mode", st.session_state.mode)
+    # print("mode", st.session_state.mode)
     if pdf:
         loaded_fields, writers, readers, scale = load_docs([pdf])
         if st.session_state.mode == "sample":
@@ -369,11 +382,10 @@ def main():
                 pd_dic = {"Field": [], "Type": [], "Option": []}
                 fields = []
                 pos_dic = {}
-                raww, rwah = 0, 0
-                print("update", update_dic)
+                raww = update_dic["RAWSCALE"] if "RAWSCALE" in update_dic else [1086, 768]
+                # print("update", update_dic)
                 for k, v_arr in update_dic.items():
                     if k == "RAWSCALE":
-                        raww, rwah = v_arr
                         continue
 
                     fields.append(k)
@@ -394,8 +406,8 @@ def main():
                     info_dic = ask_user_info(model_option, global_info, user_information, field, my_prompt_user)
                     if len(info_dic) > 1:
                         reader = readers[0]
-                        sizescale = int(scale[0])/int(raww)
-                        print("scale", raww, rwah, scale)
+                        sizescale = int(min(scale))/int(min(raww))
+                        # print("scale", sizescale, raww, scale)
                         pdfdata = writePdf(reader, info_dic, pos_dic, sizescale)
                         page = pdfium.PdfDocument(pdfdata)[0]
                         img = page.render(scale=4).to_pil()
@@ -406,87 +418,86 @@ def main():
                         st.image(img)
             else:
                 st.write("Error to preview:", err)
-            return
 
         else:
             st.write(f"Document \"{pdf.name}\" uploaded and processed. Pls enter as following fields:")
 
-        state_dic = {}
-        state_propmt_dic = {}
-        fields = []
-        for f, field in loaded_fields[0].items():
-            fields.append(f)
-            if '/_States_' in field:
-                stats = []
-                for s in field['/_States_']:
-                    stats.append(s.replace('/', ''))
-                state_dic[f] = field['/_States_']
-                state_propmt_dic[f] = stats
+            state_dic = {}
+            state_propmt_dic = {}
+            fields = []
+            for f, field in loaded_fields[0].items():
+                fields.append(f)
+                if '/_States_' in field:
+                    stats = []
+                    for s in field['/_States_']:
+                        stats.append(s.replace('/', ''))
+                    state_dic[f] = field['/_States_']
+                    state_propmt_dic[f] = stats
 
-        my_prompt_user = prompt_user()
-        for f, stats in state_propmt_dic.items():
-             my_prompt_user += "When filling up for '{}', you can choose from following options: [{}]\n".format(f, ",".join(
-                stats))
+            my_prompt_user = prompt_user()
+            for f, stats in state_propmt_dic.items():
+                 my_prompt_user += "When filling up for '{}', you can choose from following options: [{}]\n".format(f, ",".join(
+                    stats))
 
-        pd_dic = {"Field":[], "Type":[], "Option":[]}
-        for f in fields:
-            if f.lower().endswith("box"):
-                fs = f.split(" ")
-                pd_dic["Field"].append(" ".join(fs[:-2]))
-                pd_dic["Type"].append(" ".join(fs[-2:]))
+            pd_dic = {"Field":[], "Type":[], "Option":[]}
+            for f in fields:
+                if f.lower().endswith("box"):
+                    fs = f.split(" ")
+                    pd_dic["Field"].append(" ".join(fs[:-2]))
+                    pd_dic["Type"].append(" ".join(fs[-2:]))
 
-            elif len(f.split(".")) > 1:
-                pd_dic["Field"].append(f.split(".")[-1])
-                pd_dic["Type"].append("Text Box")
+                elif len(f.split(".")) > 1:
+                    pd_dic["Field"].append(f.split(".")[-1])
+                    pd_dic["Type"].append("Text Box")
 
-            else:
-                pd_dic["Field"].append(f)
-                pd_dic["Type"].append("Text Box")
+                else:
+                    pd_dic["Field"].append(f)
+                    pd_dic["Type"].append("Text Box")
 
-            if f in state_propmt_dic:
-                pd_dic["Option"].append(state_propmt_dic[f])
-                if pd_dic["Type"][-1] == "Text Box":
-                    pd_dic["Type"][-1] = "Check Box"
-            else:
-                pd_dic["Option"].append("[TEXT]")
-        # st.write(pd.DataFrame(pd_dic))
-        AgGrid(pd.DataFrame(pd_dic))
+                if f in state_propmt_dic:
+                    pd_dic["Option"].append(state_propmt_dic[f])
+                    if pd_dic["Type"][-1] == "Text Box":
+                        pd_dic["Type"][-1] = "Check Box"
+                else:
+                    pd_dic["Option"].append("[TEXT]")
+            # st.write(pd.DataFrame(pd_dic))
+            AgGrid(pd.DataFrame(pd_dic))
 
-        writer = writers[0]
+            writer = writers[0]
 
-        field = ",".join(fields)
-        user_information = st.text_input("Enter your information:")
-        if user_information:
-            update_dic = ask_user_info(model_option, global_info, user_information, field, my_prompt_user)
-            if len(update_dic) > 1:
-                for f in fields:
-                    choose = update_dic[f]
-                    if f in state_dic and choose not in state_dic[f]:
-                        find = False
-                        for state in state_dic[f]:
-                            if state.lower().find(choose.lower()) != -1:
-                                update_dic[f] = state
-                                find = True
-                        if not find:
-                            update_dic.pop(f)
+            field = ",".join(fields)
+            user_information = st.text_input("Enter your information:")
+            if user_information:
+                update_dic = ask_user_info(model_option, global_info, user_information, field, my_prompt_user)
+                if len(update_dic) > 1:
+                    for f in fields:
+                        choose = update_dic[f]
+                        if f in state_dic and choose not in state_dic[f]:
+                            find = False
+                            for state in state_dic[f]:
+                                if state.lower().find(choose.lower()) != -1:
+                                    update_dic[f] = state
+                                    find = True
+                            if not find:
+                                update_dic.pop(f)
 
 
-                writer.update_page_form_field_values(
-                    writer.pages[0], update_dic
-                )
-                from io import BytesIO
-                with BytesIO() as bytes_stream:
-                    writer.write(bytes_stream)
-                    filled = bytes_stream.getvalue()
-                    page = pdfium.PdfDocument(filled)[0]
-                    img = page.render(scale=4).to_pil()
-                    st.download_button(label="Download",
-                                       data=filled,
-                                       file_name="processed_" + pdf.name,
-                                       mime='application/octet-stream')
-                    st.image(img, caption="filled_" + pdf.name)
-            else:
-                st.write("Error to edit, pls try again")
+                    writer.update_page_form_field_values(
+                        writer.pages[0], update_dic
+                    )
+                    from io import BytesIO
+                    with BytesIO() as bytes_stream:
+                        writer.write(bytes_stream)
+                        filled = bytes_stream.getvalue()
+                        page = pdfium.PdfDocument(filled)[0]
+                        img = page.render(scale=4).to_pil()
+                        st.download_button(label="Download",
+                                           data=filled,
+                                           file_name="processed_" + pdf.name,
+                                           mime='application/octet-stream')
+                        st.image(img, caption="filled_" + pdf.name)
+                else:
+                    st.write("Error to edit, pls try again")
 
 
 if __name__ == "__main__":
