@@ -9,4 +9,4 @@ pypdf==3.17.0
 streamlit-aggrid
 pypdfium2
 reportlab
-html2image
+html2text

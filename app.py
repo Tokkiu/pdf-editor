@@ -86,7 +86,21 @@ def writePdf(existing_pdf, text, position, scale):
         output.write(bytes_stream)
         return bytes_stream.getvalue()
 
+@st.cache_data(persist=True)
+def FetchText(text):
+    from openai import OpenAI
+    client = OpenAI()
 
+    response = client.chat.completions.create(
+        model="gpt-4-1106-preview",
+        # response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant designed to summarize key points from given user's sentence."},
+            {"role": "user", "content": text}
+        ]
+    )
+
+    return response.choices[0].message.content
 
 @st.cache_data(persist=True)
 def FetchContent(img_str):
@@ -199,8 +213,8 @@ def addcell(pdf=None, url=None):
         url_placeholder.empty()
         return addurl(url)
 
-from html2image import Html2Image
-hti = Html2Image()
+# from html2image import Html2Image
+# hti = Html2Image()
 
 @st.cache_data(persist=True)
 def fetchURL(url):
@@ -211,11 +225,25 @@ def fetchURL(url):
     update_dic, err = FetchContent(encoded_string)
     return update_dic, err
 
+import requests
+from bs4 import BeautifulSoup
+import html2text
+
+@st.cache_data(persist=True)
+def fetchURL1(url):
+    # url = 'https://github.com/ggerganov/llama.cpp/discussions/4167'
+    response = requests.get(url)
+    page = str(BeautifulSoup(response.content))
+    h = html2text.HTML2Text()
+    h.ignore_links = True
+    return FetchText(h.handle(page)), None
+
 def addurl(url):
     if not url.startswith("http"):
         st.write("Invalid URL format")
 
-    update_dic, err = fetchURL(url)
+    update_dic, err = fetchURL1(url)
+    # update_dic, err = fetchURL(url)
     if err is None:
         expander = st.expander(url, expanded=True)
         expander.write(update_dic)
