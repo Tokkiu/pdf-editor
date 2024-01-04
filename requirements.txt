@@ -11,3 +11,4 @@ pypdfium2
 reportlab
 html2text
 beautifulsoup4
+bs4
