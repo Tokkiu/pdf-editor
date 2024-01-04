@@ -1,5 +1,7 @@
 import json
 import os
+import time
+
 import pandas as pd
 import streamlit as st
 from PyPDF2.generic import NameObject
@@ -18,7 +20,7 @@ st.set_page_config(page_title="FormUp",page_icon=':shark:')
 
 # @st.cache_data
 def load_docs(files):
-    st.info("`Reading doc ...`")
+    # st.info("`Reading doc ...`")
     all_text = ""
     all_fields = []
     writers = []
@@ -37,7 +39,7 @@ def load_docs(files):
                 height, width = page['/MediaBox'][2] - page['/MediaBox'][0], page['/MediaBox'][3] - page['/MediaBox'][1]
             else:
                 height, width = page['/MediaBox'][3] - page['/MediaBox'][1], page['/MediaBox'][2] - page['/MediaBox'][0]
-            print("hei", height, "w", width)
+            # print("hei", height, "w", width)
             # width, height = pdfrwpg.BBox[2], pdfrwpg.BBox[3]
             scale = [width, height]
             writer = PdfWriter()
@@ -86,7 +88,8 @@ def writePdf(existing_pdf, text, position, scale):
 
 
 
-def askPosition(img_str):
+@st.cache_data(persist=True)
+def FetchContent(img_str):
     # OpenAI API Key
     api_key = os.environ['OPENAI_API_KEY']
 
@@ -115,6 +118,10 @@ def askPosition(img_str):
     Start output JSON with ### and end with ###. No comment in json response."
     '''
 
+    prompt = '''
+    Pls read the whole content and summarize the key ideas for me.
+    Start output your summarization with ### and end with ###. No comment in response."
+    '''
     payload = {
         "model": "gpt-4-vision-preview",
         "messages": [
@@ -145,8 +152,8 @@ def askPosition(img_str):
         return {}, data
     else:
         data = data[s + 3: e]
-        update_dic = json.loads(data)
-        return update_dic, None
+        # update_dic = json.loads(data)
+        return data, None
 
 
 
@@ -162,34 +169,93 @@ def prompt_system():
     The language of response should be same with provided sentence. Start output json with ### and end with ###. No comment in json response.
     '''
 
-def prompt_user():
-    return '''
-    Here is the list of text boxes you can fill up: [{}].
-    Here is the global information you may need to know: "{}".
-    Here is the sentence of input information you need: "{}".
-    '''
+
+st.session_state.key_id = 0
 
 
-def ask_user_info(model_option, global_info, user_information, field, my_prompt_user):
-    my_prompt_user = my_prompt_user.format(field, global_info, user_information)
-    client = OpenAI()
-    completion = client.chat.completions.create(
-        model=model_option,
-        messages=[
-            {"role": "system", "content": prompt_system()},
-            {"role": "user", "content": my_prompt_user}
-        ]
-    )
-    data = completion.choices[0].message.content
-    s = data.find('###')
-    e = data.find('###', 1)
-    if s == -1 or e == -1:
-        return {}
+def addcell(pdf=None, url=None):
+    # col1, col2 = st.columns(2)
+
+    #
+    # with col1:
+    pdf_placeholder = st.empty()
+    pdf = pdf_placeholder.file_uploader("", type=[
+                              "pdf"], accept_multiple_files=False, key=st.session_state.key_id, label_visibility="collapsed")
+    st.session_state.key_id += 1
+
+    # with col2:
+    url_placeholder = st.empty()
+    url = url_placeholder.text_input('Write URL here',placeholder="Input URL here", label_visibility="collapsed", key=st.session_state.key_id)
+    st.session_state.key_id += 1
+
+
+    if pdf:
+        pdf_placeholder.empty()
+        url_placeholder.empty()
+        return addpdf(pdf)
+
+    if url:
+        pdf_placeholder.empty()
+        url_placeholder.empty()
+        return addurl(url)
+
+from html2image import Html2Image
+hti = Html2Image()
+
+@st.cache_data(persist=True)
+def fetchURL(url):
+    path = 'url_screen.png'
+    hti.screenshot(url=url, save_as=path)
+    with open(path, "rb") as image_file:
+        encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
+    update_dic, err = FetchContent(encoded_string)
+    return update_dic, err
+
+def addurl(url):
+    if not url.startswith("http"):
+        st.write("Invalid URL format")
+
+    update_dic, err = fetchURL(url)
+    if err is None:
+        expander = st.expander(url, expanded=True)
+        expander.write(update_dic)
+        addcell()
     else:
-        print("User info", data)
-        data = data[s + 3: e]
-        update_dic = json.loads(data)
-        return update_dic
+        st.write("Error to preview: ", err)
+
+def addpdf(pdf=None):
+    if pdf is None:
+        pdf = st.file_uploader("", type=[
+                                  "pdf"], accept_multiple_files=False, key=st.session_state.key_id, label_visibility="hidden")
+        st.session_state.key_id += 1
+
+    print("upload", pdf)
+    # print("mode", st.session_state.mode)
+    if pdf is None:
+        return
+
+    # with st.spinner('Wait for processing ' + pdf.name):
+    loaded_fields, writers, readers, scale = load_docs([pdf])
+    import base64
+    from io import BytesIO
+    with BytesIO() as bytes_stream:
+        writers[0].write(bytes_stream)
+        page = pdfium.PdfDocument(bytes_stream.getvalue())[0]
+        buffered = BytesIO()
+        img = page.render(scale=4).to_pil()
+        img.save(buffered, format="JPEG")
+        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+
+    update_dic, err = FetchContent(img_str)
+
+    if err is None:
+        # with st.container(border=True):
+        #     st.write(update_dic)
+        expander = st.expander(pdf.name, expanded=True)
+        expander.write(update_dic)
+        addcell()
+    else:
+        st.write("Error to preview: ", err)
 
 def main():
     
@@ -265,7 +331,7 @@ def main():
     st.write(
     f"""
     <div style="display: flex; align-items: center; margin-left: 0;">
-        <h1 style="display: inline-block;">FormUp</h1>
+        <h1 style="display: inline-block;">ShareUp</h1>
         <sup style="margin-left:5px;font-size:small; color: green;">beta</sup>
     </div>
     """,
@@ -280,10 +346,7 @@ def main():
     st.sidebar.title("Menu")
     
     model_option = st.sidebar.radio(
-        "Choose Models", ["gpt-4-1106-preview", "gpt-4"])
-
-    global_info = st.sidebar.text_input(
-        "Global Information")
+        "Choose Models", ["gpt-4-vision-preview"])
 
     if 'mode' not in st.session_state:
         st.session_state['mode'] = 'upload'
@@ -313,191 +376,27 @@ def main():
         "Donation gift card":"donation_gift_card.pdf",
     }
 
+    st.session_state.form_id = 0
 
-    col1, col2 = st.columns([3,1])
+    addcell()
 
-    with col1:
-        def changepdf():
-            st.session_state.mode = "upload"
-
-        uploaded_files = st.file_uploader("Upload a PDF Document", type=[
-                                      "pdf"], accept_multiple_files=False, on_change=changepdf)
-    with col2:
-
-        def changevalue():
-            st.session_state.mode = "sample"
-
-        selected_file = st.selectbox(
-            "Choose from samples",
-            filePath.keys(),
-            index=None,
-            placeholder="Pick one pdf ...",
-            on_change=changevalue
-        )
-
-
-
-    print("upload", uploaded_files)
-    print("sample", selected_file)
-    if st.session_state.mode == "upload":
-        pdf = uploaded_files
-    else:
-
-        pdf = open(filePath[selected_file], 'rb')
-    # print("mode", st.session_state.mode)
-    if pdf:
-        loaded_fields, writers, readers, scale = load_docs([pdf])
-        if st.session_state.mode == "sample":
-
-            # preader = readers[0]
-            st.write("You select sample pdf file:")
-            preader = PdfReader(filePath[selected_file])
-            pwriter = PdfWriter()
-            pwriter.add_page(preader.pages[0])
-            from io import BytesIO
-            with BytesIO() as bytes_stream:
-                pwriter.write(bytes_stream)
-                page = pdfium.PdfDocument(bytes_stream.getvalue())[0]
-                img = page.render(scale=4).to_pil()
-                st.image(img, caption=pdf.name)
-
-
-
-        if len(loaded_fields) != 1 or loaded_fields[0] is None:
-            st.write(f"Document \"{pdf.name}\" uploaded but cannot be processed. Try to use ChatGPT to locate fields.")
-
-            import base64
-            from io import BytesIO
-            with BytesIO() as bytes_stream:
-                writers[0].write(bytes_stream)
-                page = pdfium.PdfDocument(bytes_stream.getvalue())[0]
-                buffered = BytesIO()
-                img = page.render(scale=4).to_pil()
-                img.save(buffered, format="JPEG")
-                img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-
-            update_dic, err = askPosition(img_str)
-            if err is None:
-
-                pd_dic = {"Field": [], "Type": [], "Option": []}
-                fields = []
-                pos_dic = {}
-                raww = update_dic["RAWSCALE"] if "RAWSCALE" in update_dic else [1086, 768]
-                # print("update", update_dic)
-                for k, v_arr in update_dic.items():
-                    if k == "RAWSCALE":
-                        continue
-
-                    fields.append(k)
-                    print("k", k, "v", v_arr)
-                    v = v_arr[0]
-                    pos = v_arr[1][-2:]
-                    pos_dic[k] = pos
-                    pd_dic["Field"].append(k)
-                    pd_dic["Type"].append(v[0].upper() + v[1:] + " Box")
-                    pd_dic["Option"].append("[TEXT]")
-                AgGrid(pd.DataFrame(pd_dic))
-
-
-                field = ",".join(fields)
-                user_information = st.text_input("Enter your information:")
-                if user_information:
-                    my_prompt_user = prompt_user().format(field, global_info, user_information)
-                    info_dic = ask_user_info(model_option, global_info, user_information, field, my_prompt_user)
-                    if len(info_dic) > 1:
-                        reader = readers[0]
-                        sizescale = int(min(scale))/int(min(raww))
-                        # print("scale", sizescale, raww, scale)
-                        pdfdata = writePdf(reader, info_dic, pos_dic, sizescale)
-                        page = pdfium.PdfDocument(pdfdata)[0]
-                        img = page.render(scale=4).to_pil()
-                        st.download_button(label="Download",
-                                           data=pdfdata,
-                                           file_name="processed_" + pdf.name,
-                                           mime='application/octet-stream')
-                        st.image(img)
-            else:
-                st.write("Error to preview:", err)
-
-        else:
-            st.write(f"Document \"{pdf.name}\" uploaded and processed. Pls enter as following fields:")
-
-            state_dic = {}
-            state_propmt_dic = {}
-            fields = []
-            for f, field in loaded_fields[0].items():
-                fields.append(f)
-                if '/_States_' in field:
-                    stats = []
-                    for s in field['/_States_']:
-                        stats.append(s.replace('/', ''))
-                    state_dic[f] = field['/_States_']
-                    state_propmt_dic[f] = stats
-
-            my_prompt_user = prompt_user()
-            for f, stats in state_propmt_dic.items():
-                 my_prompt_user += "When filling up for '{}', you can choose from following options: [{}]\n".format(f, ",".join(
-                    stats))
-
-            pd_dic = {"Field":[], "Type":[], "Option":[]}
-            for f in fields:
-                if f.lower().endswith("box"):
-                    fs = f.split(" ")
-                    pd_dic["Field"].append(" ".join(fs[:-2]))
-                    pd_dic["Type"].append(" ".join(fs[-2:]))
-
-                elif len(f.split(".")) > 1:
-                    pd_dic["Field"].append(f.split(".")[-1])
-                    pd_dic["Type"].append("Text Box")
-
-                else:
-                    pd_dic["Field"].append(f)
-                    pd_dic["Type"].append("Text Box")
-
-                if f in state_propmt_dic:
-                    pd_dic["Option"].append(state_propmt_dic[f])
-                    if pd_dic["Type"][-1] == "Text Box":
-                        pd_dic["Type"][-1] = "Check Box"
-                else:
-                    pd_dic["Option"].append("[TEXT]")
-            # st.write(pd.DataFrame(pd_dic))
-            AgGrid(pd.DataFrame(pd_dic))
-
-            writer = writers[0]
-
-            field = ",".join(fields)
-            user_information = st.text_input("Enter your information:")
-            if user_information:
-                update_dic = ask_user_info(model_option, global_info, user_information, field, my_prompt_user)
-                if len(update_dic) > 1:
-                    for f in fields:
-                        choose = update_dic[f]
-                        if f in state_dic and choose not in state_dic[f]:
-                            find = False
-                            for state in state_dic[f]:
-                                if state.lower().find(choose.lower()) != -1:
-                                    update_dic[f] = state
-                                    find = True
-                            if not find:
-                                update_dic.pop(f)
-
-
-                    writer.update_page_form_field_values(
-                        writer.pages[0], update_dic
-                    )
-                    from io import BytesIO
-                    with BytesIO() as bytes_stream:
-                        writer.write(bytes_stream)
-                        filled = bytes_stream.getvalue()
-                        page = pdfium.PdfDocument(filled)[0]
-                        img = page.render(scale=4).to_pil()
-                        st.download_button(label="Download",
-                                           data=filled,
-                                           file_name="processed_" + pdf.name,
-                                           mime='application/octet-stream')
-                        st.image(img, caption="filled_" + pdf.name)
-                else:
-                    st.write("Error to edit, pls try again")
+    # while True:
+    #     form = st.form(key='my-form'+str(st.session_state.form_id))
+    #     st.session_state.form_id += 1
+    #     pdf_placeholder = st.empty()
+    #     url_placeholder = st.empty()
+    #     txt_placeholder = st.empty()
+    #     pdf = pdf_placeholder.file_uploader("", type=["pdf"], accept_multiple_files=False, key=st.session_state.key_id, label_visibility="collapsed")
+    #     st.session_state.key_id += 1
+    #     url = url_placeholder.text_input('Write URL here', placeholder="Input URL here", label_visibility="collapsed", key=st.session_state.key_id)
+    #     st.session_state.key_id += 1
+    #     submit = form.form_submit_button('Submit')
+    #     while not submit:
+    #         time.sleep(1)
+    #     pdf_placeholder.empty()
+    #     url_placeholder.empty()
+    #     txt_placeholder.empty()
+    #     addcell(pdf, url)
 
 
 if __name__ == "__main__":
