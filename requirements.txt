@@ -10,3 +10,4 @@ streamlit-aggrid
 pypdfium2
 reportlab
 html2text
+beautifulsoup4
