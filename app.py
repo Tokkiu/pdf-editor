@@ -230,7 +230,7 @@ from bs4 import BeautifulSoup
 import html2text
 
 @st.cache_data(persist=True)
-def fetchURL1(url):
+def FetchURLData(url):
     # url = 'https://github.com/ggerganov/llama.cpp/discussions/4167'
     response = requests.get(url)
     page = str(BeautifulSoup(response.content))
@@ -242,7 +242,7 @@ def addurl(url):
     if not url.startswith("http"):
         st.write("Invalid URL format")
 
-    update_dic, err = fetchURL1(url)
+    update_dic, err = FetchURLData(url)
     # update_dic, err = fetchURL(url)
     if err is None:
         expander = st.expander(url, expanded=True)
@@ -250,6 +250,20 @@ def addurl(url):
         addcell()
     else:
         st.write("Error to preview: ", err)
+
+@st.cache_data(persist=True, hash_funcs={st.runtime.uploaded_file_manager.UploadedFile: lambda pdf: pdf.name})
+def FetchPDFData(pdf):
+    loaded_fields, writers, readers, scale = load_docs([pdf])
+    import base64
+    from io import BytesIO
+    with BytesIO() as bytes_stream:
+        writers[0].write(bytes_stream)
+        page = pdfium.PdfDocument(bytes_stream.getvalue())[0]
+        buffered = BytesIO()
+        img = page.render(scale=4).to_pil()
+        img.save(buffered, format="JPEG")
+        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    return img_str
 
 def addpdf(pdf=None):
     if pdf is None:
@@ -263,17 +277,7 @@ def addpdf(pdf=None):
         return
 
     # with st.spinner('Wait for processing ' + pdf.name):
-    loaded_fields, writers, readers, scale = load_docs([pdf])
-    import base64
-    from io import BytesIO
-    with BytesIO() as bytes_stream:
-        writers[0].write(bytes_stream)
-        page = pdfium.PdfDocument(bytes_stream.getvalue())[0]
-        buffered = BytesIO()
-        img = page.render(scale=4).to_pil()
-        img.save(buffered, format="JPEG")
-        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-
+    img_str = FetchPDFData(pdf)
     update_dic, err = FetchContent(img_str)
 
     if err is None:
